@@ -1,10 +1,12 @@
 import cv2
 import mediapipe as mp
+from mediapipe.framework.formats import landmark_pb2
 import time
 import queue
 
 mp_drawing = mp.solutions.drawing_utils  # ty:ignore[possibly-missing-attribute]
 mp_face_mesh = mp.solutions.face_mesh  # ty:ignore[possibly-missing-attribute]
+mp_drawing_styles = mp.solutions.drawing_styles  # ty:ignore[possibly-missing-attribute]
 
 model_path = "models/face_landmarker.task"
 
@@ -33,10 +35,11 @@ def handle_result(
     face_landmarks = result.face_landmarks[0]
     face_blendshapes = result.face_blendshapes[0]
     # print(f"face landmarker blendshapes length: {len(face_blendshapes)}")   # 52
-    
+
     # 将结果和图像放入队列，以便在主线程中处理
     img = cv2.cvtColor(output_image.numpy_view(), cv2.COLOR_RGB2BGR)
     result_queue.put((face_landmarks, face_blendshapes, img))
+
 
 options = FaceLandmarkerOptions(
     base_options=BaseOptions(model_asset_path=model_path),
@@ -63,57 +66,72 @@ with FaceLandmarker.create_from_options(options) as landmarker:
         landmarker.detect_async(
             mp_image, timestamp_ms
         )  # 向 Face Landmarker 任务提供输入帧的时间戳
-        
+
         # 检查队列中是否有结果需要处理
         try:
             face_landmarks, face_blendshapes, vis_img = result_queue.get(block=False)
             # 绘制人脸网格
-            img_height, img_width, _ = vis_img.shape
-            
-            # 绘制面部网格连接线
-            for connection in mp_face_mesh.FACEMESH_TESSELATION:
-                start_idx, end_idx = connection
-                start_landmark = face_landmarks[start_idx]
-                end_landmark = face_landmarks[end_idx]
-                
-                # 将归一化坐标转换为像素坐标
-                start_point = (int(start_landmark.x * img_width), int(start_landmark.y * img_height))
-                end_point = (int(end_landmark.x * img_width), int(end_landmark.y * img_height))
-                
-                # 绘制连接线
-                cv2.line(vis_img, start_point, end_point, (0, 255, 0), 1)
-            
+
+            # 创建符合 draw_landmarks 函数期望格式的对象
+            face_landmarks_proto = landmark_pb2.NormalizedLandmarkList()  # ty:ignore[unresolved-attribute]
+            face_landmarks_proto.landmark.extend(
+                [
+                    landmark_pb2.NormalizedLandmark(  # ty:ignore[unresolved-attribute]
+                        x=landmark.x,
+                        y=landmark.y,
+                        z=landmark.z,
+                    )
+                    for landmark in face_landmarks
+                ]
+            )
+
+            # 绘制面部网格
+            mp_drawing.draw_landmarks(
+                image=vis_img,
+                landmark_list=face_landmarks_proto,
+                connections=mp_face_mesh.FACEMESH_TESSELATION,
+                landmark_drawing_spec=None,
+                connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_tesselation_style(),
+            )
             # 绘制面部轮廓
-            for connection in mp_face_mesh.FACEMESH_CONTOURS:
-                start_idx, end_idx = connection
-                start_landmark = face_landmarks[start_idx]
-                end_landmark = face_landmarks[end_idx]
-                
-                # 将归一化坐标转换为像素坐标
-                start_point = (int(start_landmark.x * img_width), int(start_landmark.y * img_height))
-                end_point = (int(end_landmark.x * img_width), int(end_landmark.y * img_height))
-                
-                # 绘制连接线
-                cv2.line(vis_img, start_point, end_point, (255, 255, 255), 1)
-            
-            # 绘制关键点
-            for landmark in face_landmarks:
-                x = int(landmark.x * img_width)
-                y = int(landmark.y * img_height)
-                cv2.circle(vis_img, (x, y), 1, (255, 0, 0), -1)
-            
+            mp_drawing.draw_landmarks(
+                image=vis_img,
+                landmark_list=face_landmarks_proto,
+                connections=mp_face_mesh.FACEMESH_CONTOURS,
+                landmark_drawing_spec=None,
+                connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_contours_style(),
+            )
+            # 绘制眼部轮廓
+            mp_drawing.draw_landmarks(
+                image=vis_img,
+                landmark_list=face_landmarks_proto,
+                connections=mp_face_mesh.FACEMESH_IRISES,
+                landmark_drawing_spec=None,
+                connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_iris_connections_style(),
+            )
+
             # 在图像上显示blendshape值
             y_offset = 30
-            for i, blendshape in enumerate(face_blendshapes):  # 只显示前10个，避免图像过于拥挤
+            for i, blendshape in enumerate(
+                face_blendshapes
+            ):  # 只显示前10个，避免图像过于拥挤
                 text = f"{blendshape.category_name}: {blendshape.score:.2f}"
-                cv2.putText(vis_img, text, (10, y_offset + i * 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-            
+                cv2.putText(
+                    vis_img,
+                    text,
+                    (10, y_offset + i * 20),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 255, 255),
+                    1,
+                )
+
             # 显示图像
             cv2.imshow("Face Landmarker", vis_img)
         except queue.Empty:
             # 队列中没有数据，继续循环
             pass
-        
+
         # 检查是否按下了 'q' 键
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
