@@ -28,16 +28,15 @@ def handle_result(
     """
     if not result.face_landmarks:
         return
+    # face_landmarks = result.face_landmarks[0]
+    # print(f"face landmarker landmarks length: {len(face_landmarks)}")   # 478, 每个landmark有3个坐标（x, y, z）
     face_landmarks = result.face_landmarks[0]
-    print(f"face landmarker landmarks length: {len(face_landmarks)}")   # 478, 每个landmark有3个坐标（x, y, z）
     face_blendshapes = result.face_blendshapes[0]
-    print(f"face landmarker blendshapes length: {len(face_blendshapes)}")   # 52
-    for blendshape in face_blendshapes:
-        print(f"blendshape: {blendshape.category_name}, {blendshape.score}")
+    # print(f"face landmarker blendshapes length: {len(face_blendshapes)}")   # 52
     
     # 将结果和图像放入队列，以便在主线程中处理
     img = cv2.cvtColor(output_image.numpy_view(), cv2.COLOR_RGB2BGR)
-    result_queue.put((face_landmarks, img))
+    result_queue.put((face_landmarks, face_blendshapes, img))
 
 options = FaceLandmarkerOptions(
     base_options=BaseOptions(model_asset_path=model_path),
@@ -67,7 +66,7 @@ with FaceLandmarker.create_from_options(options) as landmarker:
         
         # 检查队列中是否有结果需要处理
         try:
-            face_landmarks, vis_img = result_queue.get(block=False)
+            face_landmarks, face_blendshapes, vis_img = result_queue.get(block=False)
             # 绘制人脸网格
             img_height, img_width, _ = vis_img.shape
             
@@ -102,6 +101,12 @@ with FaceLandmarker.create_from_options(options) as landmarker:
                 x = int(landmark.x * img_width)
                 y = int(landmark.y * img_height)
                 cv2.circle(vis_img, (x, y), 1, (255, 0, 0), -1)
+            
+            # 在图像上显示blendshape值
+            y_offset = 30
+            for i, blendshape in enumerate(face_blendshapes):  # 只显示前10个，避免图像过于拥挤
+                text = f"{blendshape.category_name}: {blendshape.score:.2f}"
+                cv2.putText(vis_img, text, (10, y_offset + i * 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
             
             # 显示图像
             cv2.imshow("Face Landmarker", vis_img)
