@@ -1,10 +1,15 @@
 [project]
-name = "mediapipe-hands"
+name = "echoesphere_omni"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = "==3.12.11"
 dependencies = [
+    "asyncio>=4.0.0",
     "mediapipe>=0.10.21",
     "opencv-python>=4.11.0.86",
 ]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
