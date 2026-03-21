@@ -1,40 +1,39 @@
-from dataclasses import dataclass, field
+"""Hand-specific gesture type definitions."""
+
 from enum import Enum
-from typing import Any
 
 
-class GestureType(Enum):
+class HandGestureType(Enum):
+    """Events emitted by the hand detector state machine."""
+
+    HAND_DETECTED = "hand_detected"
     HAND_LOST = "hand_lost"
-    INDEX_TIP_MOVED = "index_tip_moved"
+    PINCH = "pinch"
+    PINCH_RELEASED = "pinch_released"
+    OPEN_BOTH_HANDS = "open_both_hands"
+    SWIPE_LEFT = "swipe_left"
+    SWIPE_RIGHT = "swipe_right"
 
 
-@dataclass(frozen=True)
-class GestureEvent:
-    """Immutable event emitted when a gesture is detected.
+# Landmark indices used for gesture recognition
+class HandLandmark:
+    THUMB_TIP = 4
+    INDEX_TIP = 8
+    MIDDLE_TIP = 12
+    RING_TIP = 16
+    PINKY_TIP = 20
+    THUMB_MCP = 2
+    INDEX_MCP = 5
+    WRIST = 0
 
-    Attributes:
-        gesture_type: The type of gesture detected.
-        data: Arbitrary payload associated with the event.
-        timestamp_ms: Timestamp in milliseconds when the event was created.
-    """
 
-    gesture_type: GestureType
-    data: dict[str, Any]
-    timestamp_ms: int
+# Distance thresholds (in normalized 0-1 coordinates)
+class GestureThresholds:
+    # Pinch: distance between thumb tip and index tip
+    PINCH_THRESHOLD = 0.06
 
-    def to_tcp_payload(self) -> str:
-        """Serialize the event into a JSON string for TCP transmission."""
-        import json
+    # Open hand: each fingertip must be this far from wrist
+    OPEN_FINGER_DISTANCE = 0.15
 
-        if self.gesture_type == GestureType.INDEX_TIP_MOVED:
-            return json.dumps(
-                {
-                    "h": 1,
-                    "x": f"{self.data['x']:.3f}",
-                    "y": f"{self.data['y']:.3f}",
-                    "v": f"{self.data['velocity']:.3f}",
-                }
-            )
-        elif self.gesture_type == GestureType.HAND_LOST:
-            return '{"h":0}'
-        return "{}"
+    # Swipe: normalised x-velocity threshold
+    SWIPE_VELOCITY_THRESHOLD = 0.025
