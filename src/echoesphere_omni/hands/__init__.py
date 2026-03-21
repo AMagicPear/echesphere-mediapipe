@@ -1,3 +1,10 @@
-from . import detect_pi
+from echoesphere_omni.hands.detector import HandDetector
+from echoesphere_omni.hands.gesture_emitter import GestureEmitter
+from echoesphere_omni.hands.gestures import GestureEvent, GestureType
 
-__all__ = ["detect_pi"]
+__all__ = [
+    "HandDetector",
+    "GestureEmitter",
+    "GestureEvent",
+    "GestureType",
+]
