@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import queue
 import threading
-from typing import TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from echoesphere_omni.events import UnifiedEvent
@@ -25,7 +25,7 @@ class EventBus:
     def __init__(self, maxsize: int = 100) -> None:
         self._queue: queue.Queue[UnifiedEvent] = queue.Queue(maxsize=maxsize)
         self._lock = threading.Lock()
-        self._subscribers: list[callable] = []
+        self._subscribers: list[Callable] = []
 
     def publish(self, event: UnifiedEvent) -> None:
         """Publish an event from a detector. Never blocks the caller."""
@@ -58,7 +58,7 @@ class EventBus:
         except queue.Empty:
             return None
 
-    def subscribe(self, callback: callable) -> None:
+    def subscribe(self, callback: Callable) -> None:
         """Register a callback to be called on every published event."""
         with self._lock:
             self._subscribers.append(callback)
