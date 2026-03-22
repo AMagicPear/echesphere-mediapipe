@@ -158,9 +158,9 @@ class FaceDetector:
 
             if result and result.face_landmarks:
                 for face_landmarks in result.face_landmarks:
-                    proto = landmark_pb2.NormalizedLandmarkList()
+                    proto = landmark_pb2.NormalizedLandmarkList()  # ty:ignore[unresolved-attribute]
                     proto.landmark.extend(
-                        landmark_pb2.NormalizedLandmark(x=lm.x, y=lm.y, z=lm.z)
+                        landmark_pb2.NormalizedLandmark(x=lm.x, y=lm.y, z=lm.z)  # ty:ignore[unresolved-attribute]
                         for lm in face_landmarks
                     )
                     mp_drawing.draw_landmarks(
