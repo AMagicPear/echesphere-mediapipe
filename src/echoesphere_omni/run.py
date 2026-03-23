@@ -21,7 +21,7 @@ def _build_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--no-preview", action="store_true", help="Disable OpenCV preview windows")
+    parser.add_argument("--preview", action="store_true", help="Enable OpenCV preview windows")
     parser.add_argument("--no-face", action="store_true", help="Disable face detector")
     parser.add_argument("--no-hand", action="store_true", help="Disable hand detector")
 
@@ -62,7 +62,7 @@ def _run_hand_detector(bus: EventBus, args: argparse.Namespace) -> None:
         camera_id=args.cameraId,
         frame_width=args.frameWidth,
         frame_height=args.frameHeight,
-        preview=not args.no_preview,
+        preview=args.preview,
     )
     detector.start()
 
@@ -78,7 +78,7 @@ def _run_face_detector(bus: EventBus, args: argparse.Namespace) -> None:
         camera_id=args.cameraId,
         frame_width=args.frameWidth,
         frame_height=args.frameHeight,
-        preview=not args.no_preview,
+        preview=args.preview,
     )
     detector.start()
 

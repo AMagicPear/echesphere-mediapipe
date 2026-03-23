@@ -9,14 +9,14 @@ EchoSphere Omni is a gesture and face landmark detection system that publishes s
 ## Running the Application
 
 ```bash
-# Full run (hand + face + preview)
+# Full run (hand + face, no preview)
 python -m echoesphere_omni.run
 
-# No preview (headless)
-python -m echoesphere_omni.run --no-preview
+# With preview
+python -m echoesphere_omni.run --preview
 
-# Hand only, no preview
-python -m echoesphere_omni.run --no-preview --no-face
+# Hand only, with preview
+python -m echoesphere_omni.run --preview --no-face
 
 # Custom TCP target
 python -m echoesphere_omni.run --host 192.168.1.100 --port 65432

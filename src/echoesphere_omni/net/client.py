@@ -22,6 +22,8 @@ from PIL import Image
 class MessageType:
     TEXT = 0x00
     IMAGE = 0x01
+    COMMAND = 0x02
+    REGISTER = 0x03
 
 
 class TcpClient:
@@ -96,6 +98,23 @@ class TcpClient:
         self._writer.write(struct.pack("!i", total_length))
         self._writer.write(bytes([MessageType.IMAGE]) + image_bytes)
         await self._writer.drain()
+
+    async def send_register(self, client_type: str, subtype: str = "") -> None:
+        """Send registration message to server."""
+        if not self._writer:
+            print("[TcpClient] Not connected")
+            return
+        import json
+        msg = {"type": "register", "client_type": client_type}
+        if subtype:
+            msg["subtype"] = subtype
+        json_data = json.dumps(msg)
+        data = json_data.encode("utf-8")
+        total_length = 1 + len(data)
+        self._writer.write(struct.pack("!i", total_length))
+        self._writer.write(bytes([MessageType.REGISTER]) + data)
+        await self._writer.drain()
+        print(f"[TcpClient] Sent register: {msg}")
 
     async def close(self) -> None:
         if self._writer:

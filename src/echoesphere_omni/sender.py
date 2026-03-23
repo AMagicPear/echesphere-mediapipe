@@ -3,17 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import queue
 import threading
 import traceback
-from typing import TYPE_CHECKING
 
 from echoesphere_omni.event_bus import EventBus
 from echoesphere_omni.events import UnifiedEvent
 from echoesphere_omni.net.client import TcpClient
-
-if TYPE_CHECKING:
-    pass
 
 
 class TcpSender:
@@ -51,7 +46,8 @@ class TcpSender:
         self._client = TcpClient(self._host, self._port)
         try:
             await self._client.connect()
-            await self._client.send_text("tracker connected")
+            # 发送注册消息（同时包含 hand 和 face 检测）
+            await self._client.send_register("mediapipe")
         except Exception:
             traceback.print_exc()
             return
