@@ -1,35 +1,33 @@
-"""TCP client with a simple length-prefixed binary protocol.
+"""TCP client with length-prefixed JSON protocol.
 
 Protocol
 --------
 Each message is encoded as:
-  - 4 bytes (big-endian, signed int): total byte length of the payload
-  - 1 byte: message type (0x00 = TEXT, 0x01 = IMAGE)
-  - N bytes: payload data
+  - 4 bytes (big-endian unsigned int): byte length of the UTF-8 JSON payload
+  - N bytes: UTF-8 encoded JSON
+
+JSON structure:
+  {"type": "text"|"image"|"command"|"register", "data": <content>}
+
+For "text": data is the text string
+For "image": data is base64 encoded image bytes
+For "register": data is {"client_type": "...", "subtype": "..."}
 
 All integers use network byte order (big-endian).
 """
 
 import asyncio
+import base64
+import json
 import struct
 import traceback
 from typing import Callable, Optional
-
-import io
-from PIL import Image
-
-
-class MessageType:
-    TEXT = 0x00
-    IMAGE = 0x01
-    COMMAND = 0x02
-    REGISTER = 0x03
 
 
 class TcpClient:
     """Async TCP client that connects to a single server.
 
-    Supports text and image messages with a length-prefixed framing protocol.
+    Supports text and image messages with a length-prefixed JSON framing protocol.
     """
 
     def __init__(
@@ -56,17 +54,21 @@ class TcpClient:
 
     async def _receive_loop(self) -> None:
         try:
-            while True:
+            while True and self._reader:
                 length_data = await self._reader.readexactly(4)
-                total_length = struct.unpack("!i", length_data)[0]
-                data_with_type = await self._reader.readexactly(total_length)
-                msg_type = data_with_type[0]
-                payload = data_with_type[1:]
+                total_length = struct.unpack(">I", length_data)[0]
+                json_data = await self._reader.readexactly(total_length)
+                msg_obj = json.loads(json_data.decode("utf-8"))
 
-                if msg_type == MessageType.TEXT:
-                    self._on_text(payload.decode("utf-8"))
-                elif msg_type == MessageType.IMAGE:
-                    self._on_image(payload)
+                msg_type = msg_obj.get("type")
+                data = msg_obj.get("data", "")
+
+                if msg_type == "text":
+                    self._on_text(data)
+                elif msg_type == "image":
+                    # data is base64 encoded
+                    img_bytes = base64.b64decode(data)
+                    self._on_image(img_bytes)
                 else:
                     print(f"[TcpClient] Unknown message type: {msg_type}")
         except asyncio.IncompleteReadError:
@@ -78,43 +80,45 @@ class TcpClient:
         finally:
             await self.close()
 
+    def _send_json(self, obj: dict) -> "asyncio.StreamWriter":
+        """Send a JSON object with length-prefixed framing. Returns the writer if connected."""
+        if not self._writer:
+            print("[TcpClient] Not connected")
+            raise ConnectionError("Not connected")
+        json_str = json.dumps(obj, ensure_ascii=False)
+        json_bytes = json_str.encode("utf-8")
+        length_prefix = struct.pack(">I", len(json_bytes))
+        self._writer.write(length_prefix + json_bytes)
+        return self._writer
+
     async def send_text(self, text: str) -> None:
         """Send a UTF-8 text message."""
-        if not self._writer:
-            print("[TcpClient] Not connected")
-            return
-        data = text.encode("utf-8")
-        total_length = 1 + len(data)
-        self._writer.write(struct.pack("!i", total_length))
-        self._writer.write(bytes([MessageType.TEXT]) + data)
-        await self._writer.drain()
+        try:
+            writer = self._send_json({"type": "text", "data": text})
+            await writer.drain()
+        except ConnectionError:
+            pass
 
     async def send_image(self, image_bytes: bytes) -> None:
-        """Send raw image bytes."""
-        if not self._writer:
-            print("[TcpClient] Not connected")
-            return
-        total_length = 1 + len(image_bytes)
-        self._writer.write(struct.pack("!i", total_length))
-        self._writer.write(bytes([MessageType.IMAGE]) + image_bytes)
-        await self._writer.drain()
+        """Send image bytes as base64-encoded JSON."""
+        try:
+            img_b64 = base64.b64encode(image_bytes).decode("ascii")
+            writer = self._send_json({"type": "image", "data": img_b64})
+            await writer.drain()
+        except ConnectionError:
+            pass
 
     async def send_register(self, client_type: str, subtype: str = "") -> None:
         """Send registration message to server."""
-        if not self._writer:
-            print("[TcpClient] Not connected")
-            return
-        import json
-        msg = {"type": "register", "client_type": client_type}
+        data = {"client_type": client_type}
         if subtype:
-            msg["subtype"] = subtype
-        json_data = json.dumps(msg)
-        data = json_data.encode("utf-8")
-        total_length = 1 + len(data)
-        self._writer.write(struct.pack("!i", total_length))
-        self._writer.write(bytes([MessageType.REGISTER]) + data)
-        await self._writer.drain()
-        print(f"[TcpClient] Sent register: {msg}")
+            data["subtype"] = subtype
+        try:
+            writer = self._send_json({"type": "register", "data": data})
+            await writer.drain()
+            print(f"[TcpClient] Sent register: {data}")
+        except ConnectionError:
+            pass
 
     async def close(self) -> None:
         if self._writer:
