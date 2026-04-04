@@ -8,6 +8,7 @@ background thread.
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 import threading
 
@@ -24,6 +25,7 @@ def _build_argparser() -> argparse.ArgumentParser:
     parser.add_argument("--preview", action="store_true", help="Enable OpenCV preview windows")
     parser.add_argument("--no-face", action="store_true", help="Disable face detector")
     parser.add_argument("--no-hand", action="store_true", help="Disable hand detector")
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
     # TCP
     parser.add_argument("--host", type=str, default="127.0.0.1")
@@ -87,8 +89,13 @@ def main() -> None:
     parser = _build_argparser()
     args = parser.parse_args()
 
+    if args.debug:
+        logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    else:
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+
     if args.no_hand and args.no_face:
-        print("Error: at least one detector must be enabled (--no-hand and --no-face both set)")
+        logging.error("Error: at least one detector must be enabled (--no-hand and --no-face both set)")
         sys.exit(1)
 
     bus = EventBus()

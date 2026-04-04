@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 import traceback
 
 from echoesphere_omni.event_bus import EventBus
 from echoesphere_omni.events import UnifiedEvent
 from echoesphere_omni.net.client import TcpClient
+
+logger = logging.getLogger("TcpSender")
 
 
 class TcpSender:
@@ -46,8 +49,10 @@ class TcpSender:
         self._client = TcpClient(self._host, self._port)
         try:
             await self._client.connect()
+            logger.info(f"Connected to TCP server {self._host}:{self._port}")
             # 发送注册消息（同时包含 hand 和 face 检测）
             await self._client.send_register("mediapipe")
+            logger.debug("Registration message sent")
         except Exception:
             traceback.print_exc()
             return
@@ -67,6 +72,7 @@ class TcpSender:
             return
         payload = event.to_json()
         if payload:
+            logger.debug(f"Sending event: {payload}")
             await self._client.send_text(payload)
 
     def stop(self) -> None:

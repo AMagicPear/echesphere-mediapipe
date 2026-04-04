@@ -19,9 +19,11 @@ All integers use network byte order (big-endian).
 import asyncio
 import base64
 import json
+import logging
 import struct
-import traceback
 from typing import Callable, Optional
+
+logger = logging.getLogger("TcpClient")
 
 
 class TcpClient:
@@ -50,7 +52,7 @@ class TcpClient:
             self.host, self.port
         )
         self._receive_task = asyncio.create_task(self._receive_loop())
-        print(f"[TcpClient] Connected to {self.host}:{self.port}")
+        logger.info(f"Connected to {self.host}:{self.port}")
 
     async def _receive_loop(self) -> None:
         try:
@@ -70,20 +72,20 @@ class TcpClient:
                     img_bytes = base64.b64decode(data)
                     self._on_image(img_bytes)
                 else:
-                    print(f"[TcpClient] Unknown message type: {msg_type}")
+                    logger.warning(f"Unknown message type: {msg_type}")
         except asyncio.IncompleteReadError:
-            print("[TcpClient] Connection closed by peer")
+            logger.info("Connection closed by peer")
         except ConnectionResetError:
-            print("[TcpClient] Connection reset")
+            logger.warning("Connection reset")
         except Exception:
-            traceback.print_exc()
+            logger.exception("Error in receive loop")
         finally:
             await self.close()
 
     def _send_json(self, obj: dict) -> "asyncio.StreamWriter":
         """Send a JSON object with length-prefixed framing. Returns the writer if connected."""
         if not self._writer:
-            print("[TcpClient] Not connected")
+            logger.warning("Not connected")
             raise ConnectionError("Not connected")
         json_str = json.dumps(obj, ensure_ascii=False)
         json_bytes = json_str.encode("utf-8")
@@ -96,6 +98,7 @@ class TcpClient:
         try:
             writer = self._send_json({"type": "text", "data": text})
             await writer.drain()
+            logger.debug(f"Text sent: {text[:100]}")
         except ConnectionError:
             pass
 
@@ -105,6 +108,7 @@ class TcpClient:
             img_b64 = base64.b64encode(image_bytes).decode("ascii")
             writer = self._send_json({"type": "image", "data": img_b64})
             await writer.drain()
+            logger.debug(f"Image sent ({len(image_bytes)} bytes, base64 {len(img_b64)} chars)")
         except ConnectionError:
             pass
 
@@ -116,7 +120,7 @@ class TcpClient:
         try:
             writer = self._send_json({"type": "register", "data": data})
             await writer.drain()
-            print(f"[TcpClient] Sent register: {data}")
+            logger.info(f"Register sent: {data}")
         except ConnectionError:
             pass
 
@@ -146,7 +150,7 @@ async def _test_main() -> None:
     try:
         await asyncio.Future()
     except KeyboardInterrupt:
-        print("Interrupted")
+        logger.info("Interrupted")
     finally:
         send_task.cancel()
         await client.close()
