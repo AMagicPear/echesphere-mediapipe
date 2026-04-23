@@ -2,107 +2,86 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
+## 项目状态
 
-EchoSphere Omni is a gesture and face landmark detection system that publishes structured events over TCP. It uses MediaPipe for detection, with a thread-safe EventBus connecting detectors to an async TCP sender.
+**新架构**：`src/echo_omni/` — 基于 `CameraCapture` 的共享视频流模式
+**旧架构**：`src/echoesphere_omni/` — ⚠️ 已弃用，基于 EventBus 的独立线程模式
 
-## Running the Application
+## 运行
 
 ```bash
-# Full run (hand + face, no preview)
-python -m echoesphere_omni.run
+# 完整运行（手势 + 人脸 + 预览窗口）
+PYTHONPATH=src python main.py --preview
 
-# With preview
-python -m echoesphere_omni.run --preview
+# 无预览（纯 headless）
+PYTHONPATH=src python main.py
 
-# Hand only, with preview
-python -m echoesphere_omni.run --preview --no-face
-
-# Custom TCP target
-python -m echoesphere_omni.run --host 192.168.1.100 --port 65432
-
-# Camera settings
-python -m echoesphere_omni.run --cameraId 0 --frameWidth 1280 --frameHeight 960
+# 指定 TCP 目标
+PYTHONPATH=src python main.py --host 192.168.1.100 --port 65432
 ```
 
-## Architecture
+## 架构
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                       run.py                            │
-│   ┌──────────────┐   ┌──────────────┐                  │
-│   │  HandDetector │   │  FaceDetector │  (daemon threads)
-│   └──────┬───────┘   └──────┬───────┘                  │
-│          │                  │                          │
-│          └────────┬─────────┘                          │
-│                   ▼                                     │
-│          ┌──────────────┐                              │
-│          │   EventBus   │  (queue.Queue, thread-safe)  │
-│          └──────┬───────┘                              │
-│                 │ bus.publish(event)                   │
-│                 ▼                                       │
-│          ┌──────────────┐                              │
-│          │  TcpSender   │  (background thread, asyncio) │
-│          └──────┬───────┘                              │
-│                 │ await send_text()                    │
-│                 ▼                                       │
-│          ┌──────────────┐                              │
-│          │  TcpClient   │ ───────────────────────────▶ Server
-│          └──────────────┘                              │
-└─────────────────────────────────────────────────────────┘
+CameraCapture (独立后台线程，共享视频流)
+        │
+        ├── HandsRecognizer.recognize_async(frame)  → on_result 回调
+        └── FaceRecognizer.recognize_async(frame)    → on_result 回调
+                    │
+                    │ asyncio.run_coroutine_threadsafe
+                    ▼
+         ┌──────────────────┐
+         │   TcpClient      │ ──────────────▶ Server (65432)
+         │  (daemon thread) │
+         └──────────────────┘
 ```
 
-### Key Design Principles
+### 核心模块 (echo_omni)
 
-- **Decoupling**: Detectors only detect; TCP sending logic is completely unaware of detection
-- **Thread Safety**: EventBus uses `queue.Queue` for lock-free cross-thread communication
-- **Silent Drop**: When queue is full, oldest events are dropped to prevent slow consumers from blocking detection pipeline
-- **State-Change Only**: Detectors maintain internal state machines and only publish on gesture state transitions (not every frame)
+| 文件 | 职责 |
+|------|------|
+| `camera/capture.py` | `CameraCapture` — 独立捕获线程，`get_latest_frame()` 供主线程预览，`on_frame()` 分发帧 |
+| `hands/recognizer.py` | `HandsRecognizer` — 手势识别，`render_preview()` 渲染骨架和 FPS（左上角） |
+| `face/recognizer.py` | `FaceRecognizer` — 面部表情识别，输出 blendshapes，`render_preview()` 渲染鼻尖点 |
 
-### Component Responsibilities
+### TCP 协议
 
-| Component | File | Responsibility |
-|-----------|------|----------------|
-| `run.py` | Entry point | Wires detectors, EventBus, and TcpSender together in daemon threads |
-| `EventBus` | `event_bus.py` | Thread-safe queue between detectors (producers) and TcpSender (consumer) |
-| `UnifiedEvent` | `events.py` | Frozen dataclass — single event type for all detectors |
-| `HandDetector` | `hands/detector.py` | MediaPipe hand landmarker + state machine (NO_HAND → HAND_PRESENT → PINCH → etc.) |
-| `FaceDetector` | `face/detector.py` | MediaPipe face landmarker with face_detected/face_lost state transitions |
-| `TcpSender` | `sender.py` | Owns a background thread running an asyncio event loop, reads from EventBus and sends over TCP |
-| `TcpClient` | `net/client.py` | Async TCP client with length-prefixed binary protocol (4 bytes length + 1 byte type + N bytes payload) |
-| Gesture types | `hands/gestures.py` | `HandGestureType` enum, `HandLandmark` indices, `GestureThresholds` constants |
+长度前缀 JSON（4 bytes big-endian length + UTF-8 JSON）：
 
-### TCP Protocol
-
-Binary protocol with length prefix:
-```
-4 bytes (big-endian int) : total payload length
-1 byte                   : message type (0x00 = TEXT, 0x01 = IMAGE)
-N bytes                  : UTF-8 JSON payload
-```
-
-Event JSON format:
 ```json
-{"source": "hand", "event": "pinch", "data": {"x": 0.234, "y": 0.567}, "timestamp_ms": 1234567890}
+{"omni_type": "hand_gesture", "data": [{"gesture": "Thumb_Up", "x": 0.234, "y": 0.567}]}
+{"omni_type": "face_blendshape", "data": [{"category": "BROW_DOWN_LEFT", "score": 0.123}]}
 ```
 
-### Gesture State Machine (HandDetector)
+### 面部表情节流策略
 
-States: `NO_HAND → HAND_PRESENT → PINCH → PINCH_RELEASED → NO_HAND`
+`FaceRecognizer` 使用双重过滤：
+- 变化阈值：`CHANGE_THRESHOLD = 0.15`（blendshapes 均值变化超过 0.15 才可能触发）
+- 最小间隔：`MIN_CALLBACK_INTERVAL_MS = 500`（两次回调至少间隔 500ms）
+- 仅输出：`BLENDSHAPE_THRESHOLD = 0.1`（只输出 score > 0.1 的 blendshape）
 
-Events emitted only on state transitions:
-- `hand_detected` / `hand_lost`
-- `pinch` (with x,y position) / `pinch_released`
-- `open_both_hands` (when both hands open simultaneously)
-- `swipe_left` / `swipe_right` (wrist x-velocity threshold)
+### 预览窗口布局
 
-## Dependencies
+- `HandsRecognizer` FPS：左上角 `(24, 50)`
+- `FaceRecognizer` FPS + 鼻尖标注：右上角 `(w - 220, 50)`，鼻尖绿点 + blendshape 文字
 
-- Python 3.12.11
+## 已弃用模块 (echoesphere_omni)
+
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| `run.py` | ⚠️ deprecated | 旧入口，基于 EventBus + 独立检测线程 |
+| `event_bus.py` | ⚠️ deprecated | 线程安全队列，已被 CameraCapture 替代 |
+| `face/detector.py` | ⚠️ deprecated | 旧 FaceDetector，输出 face_detected/face_lost 事件 |
+| `hands/detector.py` | ⚠️ deprecated | 旧 HandDetector，输出 pinch/swipe 等事件 |
+| `sender.py` | ⚠️ deprecated | TcpSender 后台线程，已被 daemon thread + TcpClient 替代 |
+
+## 依赖
+
+- Python 3.12
 - mediapipe >= 0.10.21
 - opencv-python >= 4.11.0.86
-- asyncio >= 4.0.0
+- asyncio
 
-Model files (in `models/` directory):
-- `hand_landmarker.task` — MediaPipe hand landmark model
-- `face_landmarker.task` — MediaPipe face landmark model
+模型文件（`models/` 目录）：
+- `gesture_recognizer.task` — MediaPipe 手势识别模型
+- `face_landmarker.task` — MediaPipe 人脸 landmark 模型
