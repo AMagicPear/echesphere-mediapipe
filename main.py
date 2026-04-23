@@ -9,39 +9,12 @@ from echoesphere_omni.net.client import TcpClient
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--model",
-        default="models/gesture_recognizer.task",
-        help="手势识别模型路径",
-    )
-    parser.add_argument(
-        "--camera-id",
-        type=int,
-        default=0,
-        help="摄像头 ID",
-    )
-    parser.add_argument(
-        "--num-hands",
-        type=int,
-        default=1,
-        help="最大检测手数",
-    )
-    parser.add_argument(
-        "--preview",
-        action="store_true",
-        help="显示预览窗口",
-    )
-    parser.add_argument(
-        "--host",
-        default="127.0.0.1",
-        help="TCP 服务器地址",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=65432,
-        help="TCP 服务器端口",
-    )
+    parser.add_argument("--model", default="models/gesture_recognizer.task")
+    parser.add_argument("--camera-id", type=int, default=0)
+    parser.add_argument("--num-hands", type=int, default=1)
+    parser.add_argument("--preview", action="store_true")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=65432)
     args = parser.parse_args()
 
     loop = asyncio.new_event_loop()
@@ -49,12 +22,12 @@ def main():
 
     async def on_gesture(r):
         if r.gestures:
-            for gesture in r.gestures:
-                await client.send_text(f"gesture:{gesture[0].category_name}")
+            gesture_names = [g[0].category_name for g in r.gestures]
+            await client.send_text(f"gesture:{','.join(gesture_names)}")
         else:
             await client.send_text("gesture:none")
 
-    def bridge(r):
+    def handle_result(r):
         asyncio.run_coroutine_threadsafe(on_gesture(r), loop)
 
     recognizer = HandsRecognizer(
@@ -62,45 +35,31 @@ def main():
         num_hands=args.num_hands,
         camera_id=args.camera_id,
         preview=args.preview,
+        frame_width=1920,
+        frame_height=1080,
     )
-    recognizer.on_result(bridge)
+    recognizer.on_result(handle_result)
 
-    if args.preview:
-        # 预览模式：识别器在主线程（cv2.imshow 必须在主线程），
-        # TCP 协程在后台线程
-        async def tcp_loop():
-            await client.connect()
-            await client.send_register("mediapipe", "hands")
-            try:
-                await asyncio.Future()
-            except KeyboardInterrupt:
-                pass
-            finally:
-                await client.close()
-
-        tcp_thread = threading.Thread(target=lambda: loop.run_until_complete(tcp_loop()), daemon=True)
-        tcp_thread.start()
-
-        recognizer.start()
-    else:
-        # 无头模式：识别器在后台线程，TCP 协程在主线程
-        recognizer_thread = threading.Thread(target=recognizer.start, daemon=True)
-        recognizer_thread.start()
-
-        async def run():
-            await client.connect()
-            await client.send_register("mediapipe", "hands")
-            try:
-                await asyncio.Future()
-            except KeyboardInterrupt:
-                pass
-            finally:
-                await client.close()
-
+    # TCP 在后台线程运行事件循环
+    async def tcp_loop():
+        await client.connect()
+        await client.send_register("mediapipe", "hands")
         try:
-            loop.run_until_complete(run())
+            await asyncio.Event().wait()
+        except KeyboardInterrupt:
+            pass
         finally:
-            loop.close()
+            await client.close()
+
+    tcp_thread = threading.Thread(
+        target=lambda: loop.run_until_complete(tcp_loop()), daemon=True
+    )
+    tcp_thread.start()
+
+    # 识别器在主线程（阻塞），ESC 退出后关闭事件循环
+    recognizer.start()
+    loop.call_soon_threadsafe(loop.stop)
+    tcp_thread.join(timeout=2.0)
 
 
 if __name__ == "__main__":

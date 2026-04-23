@@ -33,7 +33,7 @@ class HandsRecognizer:
         self,
         model: Path,
         num_hands: int = 1,
-        min_hand_detection_confidence: float = 0.5,
+        min_hand_detection_confidence: float = 0.7,
         min_hand_presence_confidence: float = 0.5,
         min_tracking_confidence: float = 0.5,
         camera_id: int = 0,
