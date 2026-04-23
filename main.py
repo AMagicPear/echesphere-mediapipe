@@ -1,9 +1,13 @@
 import argparse
 import asyncio
 import threading
+import json
 from pathlib import Path
 
+import cv2
+
 from echo_omni.hands.recognizer import HandsRecognizer
+from echo_omni.camera.capture import CameraCapture
 from echoesphere_omni.net.client import TcpClient
 
 
@@ -21,8 +25,6 @@ def main():
     client = TcpClient(args.host, args.port)
 
     async def on_gesture(r):
-        import json
-
         if r.gestures:
             hands = [
                 {
@@ -32,9 +34,9 @@ def main():
                 }
                 for g, c in zip(r.gestures, r.hand_centers)
             ]
-            msg = json.dumps({"omni_type": "hand_gesture", "data": hands})
+            msg = json.dumps(hands)
         else:
-            msg = json.dumps({"omni_type": "hand_gesture", "data": []})
+            msg = "[]"
         await client.send_text(msg)
 
     def handle_result(r):
@@ -43,14 +45,18 @@ def main():
     recognizer = HandsRecognizer(
         model=Path(args.model),
         num_hands=args.num_hands,
-        camera_id=args.camera_id,
         preview=args.preview,
+    )
+    recognizer.on_result(handle_result)
+    recognizer.start()
+
+    camera = CameraCapture(
+        camera_id=args.camera_id,
         frame_width=1280,
         frame_height=720,
     )
-    recognizer.on_result(handle_result)
+    camera.on_frame(recognizer.recognize_async)
 
-    # TCP 在后台线程运行事件循环
     async def tcp_loop():
         await client.connect()
         await client.send_register("mediapipe", "hands")
@@ -66,8 +72,20 @@ def main():
     )
     tcp_thread.start()
 
-    # 识别器在主线程（阻塞），ESC 退出后关闭事件循环
-    recognizer.start()
+    camera.start()
+
+    while True:
+        if args.preview:
+            rgb = camera.get_latest_frame()
+            if rgb is not None:
+                bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+                frame = recognizer.render_preview(bgr)
+                cv2.imshow("gesture_recognition", frame)
+        if cv2.waitKey(1) == 27:
+            break
+
+    camera.stop()
+    recognizer.stop()
     loop.call_soon_threadsafe(loop.stop)
     tcp_thread.join(timeout=2.0)
 
