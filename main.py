@@ -21,11 +21,21 @@ def main():
     client = TcpClient(args.host, args.port)
 
     async def on_gesture(r):
+        import json
+
         if r.gestures:
-            gesture_names = [g[0].category_name for g in r.gestures]
-            await client.send_text(f"gesture:{','.join(gesture_names)}")
+            hands = [
+                {
+                    "gesture": g[0].category_name,
+                    "x": round(c[0], 3),
+                    "y": round(c[1], 3),
+                }
+                for g, c in zip(r.gestures, r.hand_centers)
+            ]
+            msg = json.dumps({"omni_type": "hand_gesture", "data": hands})
         else:
-            await client.send_text("gesture:none")
+            msg = json.dumps({"omni_type": "hand_gesture", "data": []})
+        await client.send_text(msg)
 
     def handle_result(r):
         asyncio.run_coroutine_threadsafe(on_gesture(r), loop)
@@ -35,8 +45,8 @@ def main():
         num_hands=args.num_hands,
         camera_id=args.camera_id,
         preview=args.preview,
-        frame_width=1920,
-        frame_height=1080,
+        frame_width=1280,
+        frame_height=720,
     )
     recognizer.on_result(handle_result)
 

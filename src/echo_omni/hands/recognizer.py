@@ -23,6 +23,7 @@ class HandResult:
 
     hand_landmarks: list
     gestures: list
+    hand_centers: list[tuple[float, float]]  # 每只手的腕部坐标 (x, y)，归一化坐标
     timestamp_ms: int
 
 
@@ -34,7 +35,7 @@ class HandsRecognizer:
         model: Path,
         num_hands: int = 1,
         min_hand_detection_confidence: float = 0.7,
-        min_hand_presence_confidence: float = 0.5,
+        min_hand_presence_confidence: float = 0.7,
         min_tracking_confidence: float = 0.5,
         camera_id: int = 0,
         frame_width: int = 640,
@@ -228,6 +229,7 @@ class HandsRecognizer:
         hand_result = HandResult(
             hand_landmarks=result.hand_landmarks,
             gestures=result.gestures,
+            hand_centers=[(hand[0].x, hand[0].y) for hand in result.hand_landmarks],
             timestamp_ms=timestamp_ms,
         )
 
