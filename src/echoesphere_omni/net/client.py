@@ -48,9 +48,7 @@ class TcpClient:
         self._receive_task: Optional[asyncio.Task[None]] = None
 
     async def connect(self) -> None:
-        self._reader, self._writer = await asyncio.open_connection(
-            self.host, self.port
-        )
+        self._reader, self._writer = await asyncio.open_connection(self.host, self.port)
         self._receive_task = asyncio.create_task(self._receive_loop())
         logger.info(f"Connected to {self.host}:{self.port}")
 
@@ -108,7 +106,9 @@ class TcpClient:
             img_b64 = base64.b64encode(image_bytes).decode("ascii")
             writer = self._send_json({"type": "image", "data": img_b64})
             await writer.drain()
-            logger.debug(f"Image sent ({len(image_bytes)} bytes, base64 {len(img_b64)} chars)")
+            logger.debug(
+                f"Image sent ({len(image_bytes)} bytes, base64 {len(img_b64)} chars)"
+            )
         except ConnectionError:
             pass
 
@@ -118,7 +118,7 @@ class TcpClient:
         if subtype:
             data["subtype"] = subtype
         try:
-            writer = self._send_json({"type": "register", "data": data})
+            writer = self._send_json({"type": "register", "client_type": client_type})
             await writer.drain()
             logger.info(f"Register sent: {data}")
         except ConnectionError:
