@@ -8,10 +8,6 @@ import cv2
 import mediapipe
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision
-from mediapipe.framework.formats import landmark_pb2
-from mediapipe.python.solutions import face_mesh as mp_face_mesh
-from mediapipe.python.solutions import drawing_utils as mp_drawing
-from mediapipe.python.solutions import drawing_styles as mp_drawing_styles
 import numpy as np
 
 
@@ -28,7 +24,8 @@ class FaceRecognizer:
     """面部表情识别器"""
 
     BLENDSHAPE_THRESHOLD = 0.1
-    CHANGE_THRESHOLD = 0.05  # blendshapes 均值变化阈值
+    CHANGE_THRESHOLD = 0.15  # blendshapes 均值变化阈值
+    MIN_CALLBACK_INTERVAL_MS = 500  # 最小发送间隔（毫秒）
 
     def __init__(
         self,
@@ -59,8 +56,9 @@ class FaceRecognizer:
         self._fps = 0.0
         self._fps_avg_frame_count = 10
 
-        # 上一次触发回调的 blendshapes 均值（用于变化检测）
+        # 回调节流
         self._last_blendshape_mean: float = 0.0
+        self._last_callback_time: float = 0.0  # 上次触发时间（秒）
 
     # ------------------------------------------------------------------
     # 公开 API
@@ -148,44 +146,50 @@ class FaceRecognizer:
         with self._lock:
             self._cached_result = face_result
 
-        # 检测 blendshapes 整体变化并触发回调
+        # 节流检测：变化阈值 + 最小间隔双重约束
         if blendshapes:
             current_mean = sum(blendshapes.values()) / len(blendshapes)
         else:
             current_mean = 0.0
 
+        now = time.time()
         if abs(current_mean - self._last_blendshape_mean) > self.CHANGE_THRESHOLD:
-            self._last_blendshape_mean = current_mean
-            for callback in self._result_callbacks:
-                callback(face_result)
+            elapsed_ms = (now - self._last_callback_time) * 1000
+            if elapsed_ms >= self.MIN_CALLBACK_INTERVAL_MS:
+                self._last_blendshape_mean = current_mean
+                self._last_callback_time = now
+                for callback in self._result_callbacks:
+                    callback(face_result)
 
     # ------------------------------------------------------------------
-    # 预览渲染
+    # 预览渲染（不画 FPS，避免重叠）
     # ------------------------------------------------------------------
 
     def render_preview(self, image: np.ndarray) -> np.ndarray:
-        """在图像上渲染面部网格（返回绘制后的图像）"""
+        """在图像上渲染面部标记（鼻尖绿点 + blendshapes 文字）"""
         with self._lock:
             result = self._cached_result
 
-        # FPS 覆盖层
-        fps_text = f"FPS = {self._fps:.1f}"
-        cv2.putText(
-            image,
-            fps_text,
-            (24, 50),
-            cv2.FONT_HERSHEY_DUPLEX,
-            1,
-            (0, 0, 0),
-            1,
-            cv2.LINE_AA,
-        )
+        if result is not None and result.face_center != (0.0, 0.0):
+            h, w = image.shape[:2]
+            cx, cy = int(result.face_center[0] * w), int(result.face_center[1] * h)
+            cv2.circle(image, (cx, cy), 5, (0, 255, 0), -1)
 
-        # 绘制面部网格
-        if result is not None:
-            if result.face_center != (0.0, 0.0):
-                h, w = image.shape[:2]
-                cx, cy = int(result.face_center[0] * w), int(result.face_center[1] * h)
-                cv2.circle(image, (cx, cy), 5, (0, 255, 0), -1)
+            # blendshapes 文字（最多显示 5 个）
+            if result.blendshapes:
+                y = 90
+                for name, score in list(result.blendshapes.items())[:5]:
+                    text = f"{name}: {score:.2f}"
+                    cv2.putText(
+                        image,
+                        text,
+                        (24, y),
+                        cv2.FONT_HERSHEY_DUPLEX,
+                        0.6,
+                        (0, 200, 0),
+                        1,
+                        cv2.LINE_AA,
+                    )
+                    y += 22
 
         return image

@@ -26,14 +26,10 @@ def main():
     loop = asyncio.new_event_loop()
     client = TcpClient(args.host, args.port)
 
-    async def on_gesture(r):
+    async def on_hand(r):
         if r.gestures:
             hands = [
-                {
-                    "gesture": g[0].category_name,
-                    "x": round(c[0], 3),
-                    "y": round(c[1], 3),
-                }
+                {"gesture": g[0].category_name, "x": round(c[0], 3), "y": round(c[1], 3)}
                 for g, c in zip(r.gestures, r.hand_centers)
             ]
             msg = json.dumps({"omni_type": "hand_gesture", "data": hands})
@@ -49,34 +45,34 @@ def main():
             msg = json.dumps({"omni_type": "face_blendshape", "data": []})
         await client.send_text(msg)
 
-    def handle_gesture(r):
-        asyncio.run_coroutine_threadsafe(on_gesture(r), loop)
+    def handle_hand(r):
+        asyncio.run_coroutine_threadsafe(on_hand(r), loop)
 
     def handle_face(r):
         asyncio.run_coroutine_threadsafe(on_face(r), loop)
 
-    recognizer = HandsRecognizer(
+    hand_tracker = HandsRecognizer(
         model=Path(args.model),
         num_hands=args.num_hands,
         preview=args.preview,
     )
-    recognizer.on_result(handle_gesture)
-    recognizer.start()
+    hand_tracker.on_result(handle_hand)
+    hand_tracker.start()
 
-    face_recognizer = FaceRecognizer(
+    face_tracker = FaceRecognizer(
         model=Path(args.face_model),
         preview=args.preview,
     )
-    face_recognizer.on_result(handle_face)
-    face_recognizer.start()
+    face_tracker.on_result(handle_face)
+    face_tracker.start()
 
     camera = CameraCapture(
         camera_id=args.camera_id,
         frame_width=1280,
         frame_height=720,
     )
-    camera.on_frame(recognizer.recognize_async)
-    camera.on_frame(face_recognizer.recognize_async)
+    camera.on_frame(hand_tracker.recognize_async)
+    camera.on_frame(face_tracker.recognize_async)
 
     async def tcp_loop():
         await client.connect()
@@ -101,15 +97,15 @@ def main():
             rgb = camera.get_latest_frame()
             if rgb is not None:
                 bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-                frame = recognizer.render_preview(bgr)
-                frame = face_recognizer.render_preview(frame)
+                frame = hand_tracker.render_preview(bgr)
+                frame = face_tracker.render_preview(frame)
                 cv2.imshow("recognition", frame)
         if cv2.waitKey(1) == 27:
             break
 
     camera.stop()
-    recognizer.stop()
-    face_recognizer.stop()
+    hand_tracker.stop()
+    face_tracker.stop()
     loop.call_soon_threadsafe(loop.stop)
     tcp_thread.join(timeout=2.0)
 

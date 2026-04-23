@@ -159,8 +159,8 @@ class HandsRecognizer:
         handedness_color = (88, 205, 54)
         font_size, font_thickness = 1, 1
 
-        # FPS 覆盖层
-        fps_text = f"FPS = {self._fps:.1f}"
+        # FPS 覆盖层（左上角）
+        fps_text = f"HANDS FPS = {self._fps:.1f}"
         cv2.putText(
             image,
             fps_text,
