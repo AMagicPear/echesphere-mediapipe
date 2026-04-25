@@ -112,15 +112,14 @@ class TcpClient:
         except ConnectionError:
             pass
 
-    async def send_register(self, client_type: str, subtype: str = "") -> None:
+    async def send_register(self, client_type: str, modules: list[str]) -> None:
         """Send registration message to server."""
-        data = {"client_type": client_type}
-        if subtype:
-            data["subtype"] = subtype
         try:
-            writer = self._send_json({"type": "register", "client_type": client_type})
+            writer = self._send_json(
+                {"type": "register", "data": modules, "client_type": client_type}
+            )
             await writer.drain()
-            logger.info(f"Register sent: {data}")
+            logger.info(f"Register sent: {client_type} with modules {modules}")
         except ConnectionError:
             pass
 

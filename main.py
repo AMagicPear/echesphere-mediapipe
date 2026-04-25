@@ -17,7 +17,7 @@ def main():
     parser.add_argument("--model", default="models/gesture_recognizer.task")
     parser.add_argument("--face-model", default="models/face_landmarker.task")
     parser.add_argument("--camera-id", type=int, default=0)
-    parser.add_argument("--num-hands", type=int, default=1)
+    parser.add_argument("--num-hands", type=int, default=2)
     parser.add_argument("--preview", action="store_true")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=65432)
@@ -76,8 +76,7 @@ def main():
 
     async def tcp_loop():
         await client.connect()
-        await client.send_register("mediapipe", "hands")
-        await client.send_register("mediapipe", "face")
+        await client.send_register("mediapipe", ["hands", "face"])
         try:
             await asyncio.Event().wait()
         except KeyboardInterrupt:
