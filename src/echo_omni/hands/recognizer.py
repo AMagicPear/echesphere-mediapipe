@@ -204,8 +204,9 @@ class HandsRecognizer:
             return None
 
         # 方向向量 = 食指尖 - 食指掌骨基部，按帧尺寸比例转像素后归一化
+        # y 在像素坐标系向下为正，取反使其向上为正
         dx = (target_hand[8].x - target_hand[5].x) * 1280
-        dy = (target_hand[8].y - target_hand[5].y) * 720
+        dy = -(target_hand[8].y - target_hand[5].y) * 720
         mag = (dx * dx + dy * dy) ** 0.5
         if mag > 0:
             dx, dy = dx / mag, dy / mag

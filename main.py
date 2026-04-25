@@ -50,8 +50,10 @@ def main():
         asyncio.run_coroutine_threadsafe(on_hand(r), loop)
 
     def handle_direction(direction):
-        msg = json.dumps({"type": "command", "data": f"input:move:{direction['x']},{direction['y']}"})
-        asyncio.run_coroutine_threadsafe(client.send_text(msg), loop)
+        asyncio.run_coroutine_threadsafe(
+            client.send_command(f"input:move:{direction['x']},{direction['y']}", "unity"),
+            loop,
+        )
 
     def handle_face(r):
         asyncio.run_coroutine_threadsafe(on_face(r), loop)

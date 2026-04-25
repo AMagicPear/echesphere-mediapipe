@@ -123,6 +123,14 @@ class TcpClient:
         except ConnectionError:
             pass
 
+    async def send_command(self, data: str, relay_to: str) -> None:
+        """Send a command message directly (not wrapped in text envelope)."""
+        try:
+            writer = self._send_json({"type": "command", "data": data, "relay_to": relay_to})
+            await writer.drain()
+        except ConnectionError:
+            pass
+
     async def close(self) -> None:
         if self._writer:
             self._writer.close()
