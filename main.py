@@ -19,6 +19,7 @@ def main():
     parser.add_argument("--camera-id", type=int, default=0)
     parser.add_argument("--num-hands", type=int, default=2)
     parser.add_argument("--preview", action="store_true")
+    parser.add_argument("--left-hand-direction", action="store_true", help="启用左手方向指示")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=65432)
     args = parser.parse_args()
@@ -48,6 +49,10 @@ def main():
     def handle_hand(r):
         asyncio.run_coroutine_threadsafe(on_hand(r), loop)
 
+    def handle_direction(direction):
+        msg = json.dumps({"type": "command", "data": f"input:move:{direction['x']},{direction['y']}"})
+        asyncio.run_coroutine_threadsafe(client.send_text(msg), loop)
+
     def handle_face(r):
         asyncio.run_coroutine_threadsafe(on_face(r), loop)
 
@@ -57,6 +62,9 @@ def main():
         preview=args.preview,
     )
     hand_tracker.on_result(handle_hand)
+    hand_tracker.on_direction(handle_direction)
+    if args.left_hand_direction:
+        hand_tracker.set_left_hand_direction(True)
     hand_tracker.start()
 
     face_tracker = FaceRecognizer(
