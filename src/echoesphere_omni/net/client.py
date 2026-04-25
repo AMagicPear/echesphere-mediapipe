@@ -38,11 +38,13 @@ class TcpClient:
         port: int,
         on_text: Optional[Callable[[str], None]] = None,
         on_image: Optional[Callable[[bytes], None]] = None,
+        on_command: Optional[Callable[[dict], None]] = None,
     ):
         self.host = host
         self.port = port
         self._on_text = on_text or (lambda msg: None)
         self._on_image = on_image or (lambda img: None)
+        self._on_command = on_command or (lambda msg: None)
         self._reader: Optional[asyncio.StreamReader] = None
         self._writer: Optional[asyncio.StreamWriter] = None
         self._receive_task: Optional[asyncio.Task[None]] = None
@@ -69,6 +71,8 @@ class TcpClient:
                     # data is base64 encoded
                     img_bytes = base64.b64decode(data)
                     self._on_image(img_bytes)
+                elif msg_type == "command":
+                    self._on_command(msg_obj)
                 else:
                     logger.warning(f"Unknown message type: {msg_type}")
         except asyncio.IncompleteReadError:

@@ -25,7 +25,21 @@ def main():
     args = parser.parse_args()
 
     loop = asyncio.new_event_loop()
-    client = TcpClient(args.host, args.port)
+
+    hand_tracker = HandsRecognizer(
+        model=Path(args.model),
+        num_hands=args.num_hands,
+        preview=args.preview,
+    )
+
+    def handle_command(msg: dict):
+        data = msg.get("data", "")
+        if data == "hand_direction:on":
+            hand_tracker.set_left_hand_direction(True)
+        elif data == "hand_direction:off":
+            hand_tracker.set_left_hand_direction(False)
+
+    client = TcpClient(args.host, args.port, on_command=handle_command)
 
     async def on_hand(r):
         if r.gestures:
@@ -58,11 +72,6 @@ def main():
     def handle_face(r):
         asyncio.run_coroutine_threadsafe(on_face(r), loop)
 
-    hand_tracker = HandsRecognizer(
-        model=Path(args.model),
-        num_hands=args.num_hands,
-        preview=args.preview,
-    )
     hand_tracker.on_result(handle_hand)
     hand_tracker.on_direction(handle_direction)
     if args.left_hand_direction:
