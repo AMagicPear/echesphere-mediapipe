@@ -1,8 +1,8 @@
-# EchoSphere Omni 文档目录
+# Echoesphere Omni 文档目录
 
 ## 概述
 
-EchoSphere Omni 是一个基于 MediaPipe 的手部和面部关键点检测系统，能够实时检测手势和面部姿态，并通过 TCP 协议发布结构化事件。
+Echoesphere Omni 是一个基于 MediaPipe 的手部和面部关键点检测系统，能够实时检测手势和面部姿态，并通过 TCP 协议发布结构化事件。
 
 ## 核心文档
 

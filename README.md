@@ -1,4 +1,4 @@
-# EchoSphere Omni
+# Echoesphere Omni
 
 手势与面部 landmark 检测，统一通过 TCP Socket 向外发送结构化事件。
 
