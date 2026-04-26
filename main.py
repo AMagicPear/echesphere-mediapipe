@@ -9,7 +9,7 @@ import cv2
 from echo_omni.hands.recognizer import HandsRecognizer
 from echo_omni.face.recognizer import FaceRecognizer
 from echo_omni.camera.capture import CameraCapture
-from echoesphere_omni.net.client import TcpClient
+from echo_omni.net import TcpClient
 
 
 def main():
@@ -39,7 +39,8 @@ def main():
         elif data == "hand_direction:off":
             hand_tracker.set_left_hand_direction(False)
 
-    client = TcpClient(args.host, args.port, on_command=handle_command)
+    client = TcpClient(args.host, args.port)
+    client.on_command += handle_command
 
     async def on_hand(r):
         if r.gestures:

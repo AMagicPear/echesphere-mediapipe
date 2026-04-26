@@ -1,4 +1,4 @@
-"""TCP client with length-prefixed JSON protocol.
+"""TCP client with length-prefixed JSON protocol and subscription-based callbacks.
 
 Protocol
 --------
@@ -14,7 +14,28 @@ For "image": data is base64 encoded image bytes
 For "register": data is {"client_type": "...", "subtype": "..."}
 
 All integers use network byte order (big-endian).
+
+Subscription API
+---------------
+Use += to subscribe and -= to unsubscribe::
+
+    client.on_text += lambda msg: print(msg)
+    client.on_image += lambda img: handle(img)
+    client.on_command += lambda msg: process(msg)
+
+    # unsubscribe
+    def handler(msg):
+        ...
+    client.on_command += handler
+    client.on_command -= handler
+
+Or use subscribe()::
+
+    client.subscribe("text", lambda msg: ...)
+    client.unsubscribe("text", lambda msg: ...)
 """
+
+from __future__ import annotations
 
 import asyncio
 import base64
@@ -26,25 +47,59 @@ from typing import Callable, Optional
 logger = logging.getLogger("TcpClient")
 
 
+class _Event:
+    """A simple event that holds a list of callbacks and dispatches to all of them."""
+
+    def __init__(self, name: str) -> None:
+        self._name = name
+        self._callbacks: list[Callable] = []
+
+    def __iadd__(self, callback: Callable) -> _Event:
+        """Subscribe a handler with +=, e.g. client.on_text += handler."""
+        self._callbacks.append(callback)
+        return self
+
+    def __isub__(self, callback: Callable) -> _Event:
+        """Unsubscribe a handler with -=, e.g. client.on_text -= handler."""
+        self._callbacks.remove(callback)
+        return self
+
+    def subscribe(self, callback: Callable) -> None:
+        """Explicit subscribe."""
+        self._callbacks.append(callback)
+
+    def unsubscribe(self, callback: Callable) -> None:
+        """Explicit unsubscribe."""
+        self._callbacks.remove(callback)
+
+    def dispatch(self, *args, **kwargs) -> None:
+        for cb in self._callbacks:
+            try:
+                cb(*args, **kwargs)
+            except Exception:
+                logger.exception(f"Error in {self._name} handler")
+
+
 class TcpClient:
     """Async TCP client that connects to a single server.
 
     Supports text and image messages with a length-prefixed JSON framing protocol.
+    Uses subscription-based callbacks::
+
+        client = TcpClient("127.0.0.1", 65432)
+        client.on_text += lambda msg: print(f"Received: {msg}")
+        client.on_command += lambda msg: handle(msg)
     """
 
-    def __init__(
-        self,
-        host: str,
-        port: int,
-        on_text: Optional[Callable[[str], None]] = None,
-        on_image: Optional[Callable[[bytes], None]] = None,
-        on_command: Optional[Callable[[dict], None]] = None,
-    ):
+    def __init__(self, host: str, port: int) -> None:
         self.host = host
         self.port = port
-        self._on_text = on_text or (lambda msg: None)
-        self._on_image = on_image or (lambda img: None)
-        self._on_command = on_command or (lambda msg: None)
+
+        # Subscription-based events
+        self.on_text = _Event("on_text")
+        self.on_image = _Event("on_image")
+        self.on_command = _Event("on_command")
+
         self._reader: Optional[asyncio.StreamReader] = None
         self._writer: Optional[asyncio.StreamWriter] = None
         self._receive_task: Optional[asyncio.Task[None]] = None
@@ -66,13 +121,12 @@ class TcpClient:
                 data = msg_obj.get("data", "")
 
                 if msg_type == "text":
-                    self._on_text(data)
+                    self.on_text.dispatch(data)
                 elif msg_type == "image":
-                    # data is base64 encoded
                     img_bytes = base64.b64decode(data)
-                    self._on_image(img_bytes)
+                    self.on_image.dispatch(img_bytes)
                 elif msg_type == "command":
-                    self._on_command(msg_obj)
+                    self.on_command.dispatch(msg_obj)
                 else:
                     logger.warning(f"Unknown message type: {msg_type}")
         except asyncio.IncompleteReadError:
@@ -143,29 +197,3 @@ class TcpClient:
         if self._receive_task:
             self._receive_task.cancel()
             self._receive_task = None
-
-
-# ----------------------------------------------------------------------
-# Standalone test
-# ----------------------------------------------------------------------
-async def _test_main() -> None:
-    client = TcpClient("127.0.0.1", 65432)
-    await client.connect()
-
-    async def periodic_send() -> None:
-        for i in range(5):
-            await asyncio.sleep(1)
-            await client.send_text(f"Ping {i}")
-
-    send_task = asyncio.create_task(periodic_send())
-    try:
-        await asyncio.Future()
-    except KeyboardInterrupt:
-        logger.info("Interrupted")
-    finally:
-        send_task.cancel()
-        await client.close()
-
-
-if __name__ == "__main__":
-    asyncio.run(_test_main())
