@@ -1,4 +1,4 @@
-# Echoesphere Omni
+# Echo Omni
 
 手势与面部 landmark 检测，统一通过 TCP Socket 向外发送结构化事件。
 
@@ -62,7 +62,8 @@ PYTHONPATH=src python main.py --camera-id 0 --preview
 | `--host` | 127.0.0.1 | TCP 服务器地址 |
 | `--port` | 65432 | TCP 服务器端口 |
 | `--camera-id` | 0 | 摄像头设备索引 |
-| `--num-hands` | 1 | 最大检测手部数量 |
+| `--num-hands` | 2 | 最大检测手部数量 |
+| `--left-hand-direction` | False | 启用左手方向指示 |
 | `--model` | models/gesture_recognizer.task | 手势识别模型路径 |
 | `--face-model` | models/face_landmarker.task | 人脸 landmark 模型路径 |
 
@@ -74,8 +75,10 @@ src/echo_omni/                  # 新架构（推荐）
 │   └── capture.py              # CameraCapture 共享相机捕获
 ├── hands/
 │   └── recognizer.py           # HandsRecognizer 手势识别器
-└── face/
-    └── recognizer.py           # FaceRecognizer 面部表情识别器
+├── face/
+│   └── recognizer.py           # FaceRecognizer 面部表情识别器
+└── net/
+    └── client.py               # TcpClient TCP 客户端（自动重连）
 
 src/echoesphere_omni/           # ⚠️ 已弃用（旧架构）
 ├── run.py                      # 入口

@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Callable, Optional
 from dataclasses import dataclass
+import logging
 import threading
 import time
 
@@ -9,6 +10,8 @@ import mediapipe
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision
 import numpy as np
+
+logger = logging.getLogger("FaceRecognizer")
 
 
 @dataclass
@@ -87,11 +90,13 @@ class FaceRecognizer:
 
     def recognize_async(self, rgb_image, timestamp_ms: int) -> None:
         """异步识别面部（外部送帧模式使用）"""
-        if self._detector:
-            mp_image = mediapipe.Image(
-                image_format=mediapipe.ImageFormat.SRGB, data=rgb_image
-            )
-            self._detector.detect_async(mp_image, timestamp_ms)
+        if self._detector is None:
+            logger.warning("recognize_async called before start() — frame discarded")
+            return
+        mp_image = mediapipe.Image(
+            image_format=mediapipe.ImageFormat.SRGB, data=rgb_image
+        )
+        self._detector.detect_async(mp_image, timestamp_ms)
 
     def on_result(self, callback: Callable[[FaceResult], None]) -> None:
         """注册结果回调"""

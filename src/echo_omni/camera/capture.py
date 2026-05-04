@@ -1,3 +1,4 @@
+import logging
 import threading
 import time
 from typing import Callable, Optional
@@ -5,13 +6,23 @@ from typing import Callable, Optional
 import cv2
 import numpy as np
 
+logger = logging.getLogger("CameraCapture")
 
 # 帧回调类型
 FrameCallback = Callable[[np.ndarray, int], None]
 
 
 class CameraCapture:
-    """共享相机捕获器，支持多个 recognizer 共享同一路视频流"""
+    """共享相机捕获器，支持多个 recognizer 共享同一路视频流
+
+    可作为上下文管理器使用::
+
+        with CameraCapture() as camera:
+            camera.start()
+            ...
+    """
+
+    MAX_CONSECUTIVE_FAILURES = 30
 
     def __init__(
         self,
@@ -29,6 +40,12 @@ class CameraCapture:
         self._thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
         self._latest_rgb: Optional[np.ndarray] = None
+
+    def __enter__(self) -> "CameraCapture":
+        return self
+
+    def __exit__(self, *args) -> None:
+        self.stop()
 
     def start(self) -> None:
         """启动相机捕获（非阻塞）"""
@@ -64,10 +81,19 @@ class CameraCapture:
 
     def _capture_loop(self) -> None:
         """捕获循环（后台线程）"""
+        failures = 0
         while self._running and self._cap.isOpened():
             success, image = self._cap.read()
             if not success:
+                failures += 1
+                if failures >= self.MAX_CONSECUTIVE_FAILURES:
+                    logger.warning(
+                        "Camera read failed %d consecutive times — camera may be disconnected",
+                        failures,
+                    )
+                time.sleep(0.01)
                 continue
+            failures = 0
 
             image = cv2.flip(image, 1)
             rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -79,7 +105,6 @@ class CameraCapture:
             for callback in self._callbacks:
                 callback(rgb_image, timestamp_ms)
 
-            # 小延迟避免过度占用 CPU
             time.sleep(0.001)
 
     @property

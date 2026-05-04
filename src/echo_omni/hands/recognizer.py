@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Callable, Optional
 from dataclasses import dataclass
+import logging
 import threading
 import time
 
@@ -15,6 +16,8 @@ from mediapipe.python.solutions import (
     drawing_utils as mp_drawing,
     drawing_styles as mp_drawing_styles,
 )
+
+logger = logging.getLogger("HandsRecognizer")
 
 
 @dataclass
@@ -55,6 +58,10 @@ class HandsRecognizer:
         # 左手方向指示功能开关
         self._left_hand_direction_enabled = False
 
+        # 帧尺寸（从实际图像更新，用于方向向量计算）
+        self._frame_width = 1280
+        self._frame_height = 720
+
         # 线程安全的结果缓存
         self._lock = threading.Lock()
         self._cached_result: Optional[HandResult] = None
@@ -91,11 +98,16 @@ class HandsRecognizer:
 
     def recognize_async(self, rgb_image, timestamp_ms: int) -> None:
         """异步识别手势（外部送帧模式使用）"""
-        if self._recognizer:
-            mp_image = mediapipe.Image(
-                image_format=mediapipe.ImageFormat.SRGB, data=rgb_image
-            )
-            self._recognizer.recognize_async(mp_image, timestamp_ms)
+        if self._recognizer is None:
+            logger.warning("recognize_async called before start() — frame discarded")
+            return
+        h, w = rgb_image.shape[:2]
+        self._frame_width = w
+        self._frame_height = h
+        mp_image = mediapipe.Image(
+            image_format=mediapipe.ImageFormat.SRGB, data=rgb_image
+        )
+        self._recognizer.recognize_async(mp_image, timestamp_ms)
 
     def on_result(self, callback: Callable[[HandResult], None]) -> None:
         """注册结果回调"""
@@ -144,7 +156,7 @@ class HandsRecognizer:
         # 左手方向指示（每帧检测，在创建 HandResult 前计算）
         left_dir = None
         if self._left_hand_direction_enabled:
-            left_dir = self._compute_and_fire_direction(result)
+            left_dir = self._compute_left_direction(result)
 
         hand_result = HandResult(
             hand_landmarks=result.hand_landmarks,
@@ -178,10 +190,10 @@ class HandsRecognizer:
             for callback in self._direction_callbacks:
                 callback(left_dir)
 
-    def _compute_and_fire_direction(
+    def _compute_left_direction(
         self, result: vision.GestureRecognizerResult
     ) -> dict | None:
-        """计算左手方向并触发回调，返回方向字典或 None"""
+        """计算左手食指方向向量，返回归一化的 {"x": float, "y": float} 或 None"""
         # 选取左手（两只手时取left，一只时直接用）
         target_hand = None
 
@@ -203,10 +215,10 @@ class HandsRecognizer:
         if not self._is_finger_extended(target_hand, 8, 5):
             return None
 
-        # 方向向量 = 食指尖 - 食指掌骨基部，按帧尺寸比例转像素后归一化
+        # 方向向量 = 食指尖 - 食指掌骨基部，按实际帧尺寸转像素后归一化
         # y 在像素坐标系向下为正，取反使其向上为正
-        dx = (target_hand[8].x - target_hand[5].x) * 1280
-        dy = -(target_hand[8].y - target_hand[5].y) * 720
+        dx = (target_hand[8].x - target_hand[5].x) * self._frame_width
+        dy = -(target_hand[8].y - target_hand[5].y) * self._frame_height
         mag = (dx * dx + dy * dy) ** 0.5
         if mag > 0:
             dx, dy = dx / mag, dy / mag

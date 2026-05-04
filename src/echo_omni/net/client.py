@@ -46,6 +46,9 @@ from typing import Callable, Optional
 
 logger = logging.getLogger("TcpClient")
 
+RECONNECT_INITIAL_DELAY = 1.0
+RECONNECT_MAX_DELAY = 30.0
+
 
 class _Event:
     """A simple event that holds a list of callbacks and dispatches to all of them."""
@@ -81,7 +84,7 @@ class _Event:
 
 
 class TcpClient:
-    """Async TCP client that connects to a single server.
+    """Async TCP client with automatic reconnection.
 
     Supports text and image messages with a length-prefixed JSON framing protocol.
     Uses subscription-based callbacks::
@@ -89,29 +92,61 @@ class TcpClient:
         client = TcpClient("127.0.0.1", 65432)
         client.on_text += lambda msg: print(f"Received: {msg}")
         client.on_command += lambda msg: handle(msg)
+        client.on_connected += lambda: print("Connected!")
     """
 
-    def __init__(self, host: str, port: int) -> None:
+    def __init__(self, host: str, port: int, reconnect: bool = True) -> None:
         self.host = host
         self.port = port
+        self.reconnect = reconnect
 
         # Subscription-based events
         self.on_text = _Event("on_text")
         self.on_image = _Event("on_image")
         self.on_command = _Event("on_command")
+        self.on_connected = _Event("on_connected")
 
         self._reader: Optional[asyncio.StreamReader] = None
         self._writer: Optional[asyncio.StreamWriter] = None
         self._receive_task: Optional[asyncio.Task[None]] = None
+        self._should_reconnect = True
+        self._reconnect_delay = RECONNECT_INITIAL_DELAY
 
     async def connect(self) -> None:
-        self._reader, self._writer = await asyncio.open_connection(self.host, self.port)
-        self._receive_task = asyncio.create_task(self._receive_loop())
-        logger.info(f"Connected to {self.host}:{self.port}")
+        """Connect to the server, with optional retry on failure.
+
+        When reconnect=True (default), this method retries with exponential
+        backoff until successful. Fires on_connected on each successful
+        (re)connection.
+        """
+        while True:
+            try:
+                self._reader, self._writer = await asyncio.open_connection(
+                    self.host, self.port
+                )
+                self._reconnect_delay = RECONNECT_INITIAL_DELAY
+                self._receive_task = asyncio.create_task(self._receive_loop())
+                logger.info("Connected to %s:%d", self.host, self.port)
+                self.on_connected.dispatch()
+                return
+            except (ConnectionRefusedError, OSError) as e:
+                if not self.reconnect:
+                    raise
+                logger.warning(
+                    "Connection to %s:%d failed: %s. Retrying in %.1fs...",
+                    self.host,
+                    self.port,
+                    e,
+                    self._reconnect_delay,
+                )
+                await asyncio.sleep(self._reconnect_delay)
+                self._reconnect_delay = min(
+                    self._reconnect_delay * 2, RECONNECT_MAX_DELAY
+                )
 
     async def _receive_loop(self) -> None:
         try:
-            while True and self._reader:
+            while self._reader:
                 length_data = await self._reader.readexactly(4)
                 total_length = struct.unpack(">I", length_data)[0]
                 json_data = await self._reader.readexactly(total_length)
@@ -128,7 +163,7 @@ class TcpClient:
                 elif msg_type == "command":
                     self.on_command.dispatch(msg_obj)
                 else:
-                    logger.warning(f"Unknown message type: {msg_type}")
+                    logger.warning("Unknown message type: %s", msg_type)
         except asyncio.IncompleteReadError:
             logger.info("Connection closed by peer")
         except ConnectionResetError:
@@ -136,12 +171,31 @@ class TcpClient:
         except Exception:
             logger.exception("Error in receive loop")
         finally:
-            await self.close()
+            await self._cleanup_transport()
+            if self._should_reconnect:
+                logger.info(
+                    "Reconnecting in %.1fs...", self._reconnect_delay
+                )
+                await asyncio.sleep(self._reconnect_delay)
+                self._reconnect_delay = min(
+                    self._reconnect_delay * 2, RECONNECT_MAX_DELAY
+                )
+                asyncio.create_task(self.connect())
+
+    async def _cleanup_transport(self) -> None:
+        """Close writer/reader without canceling the receive task."""
+        if self._writer:
+            try:
+                self._writer.close()
+                await self._writer.wait_closed()
+            except Exception:
+                pass
+            self._writer = None
+            self._reader = None
 
     def _send_json(self, obj: dict) -> "asyncio.StreamWriter":
         """Send a JSON object with length-prefixed framing. Returns the writer if connected."""
         if not self._writer:
-            logger.warning("Not connected")
             raise ConnectionError("Not connected")
         json_str = json.dumps(obj, ensure_ascii=False)
         json_bytes = json_str.encode("utf-8")
@@ -154,7 +208,6 @@ class TcpClient:
         try:
             writer = self._send_json({"type": "text", "data": text})
             await writer.drain()
-            logger.debug(f"Text sent: {text[:100]}")
         except ConnectionError:
             pass
 
@@ -164,9 +217,6 @@ class TcpClient:
             img_b64 = base64.b64encode(image_bytes).decode("ascii")
             writer = self._send_json({"type": "image", "data": img_b64})
             await writer.drain()
-            logger.debug(
-                f"Image sent ({len(image_bytes)} bytes, base64 {len(img_b64)} chars)"
-            )
         except ConnectionError:
             pass
 
@@ -177,23 +227,24 @@ class TcpClient:
                 {"type": "register", "data": modules, "client_type": client_type}
             )
             await writer.drain()
-            logger.info(f"Register sent: {client_type} with modules {modules}")
+            logger.info("Register sent: %s with modules %s", client_type, modules)
         except ConnectionError:
             pass
 
     async def send_command(self, data: str, relay_to: str) -> None:
         """Send a command message directly (not wrapped in text envelope)."""
         try:
-            writer = self._send_json({"type": "command", "data": data, "relay_to": relay_to})
+            writer = self._send_json(
+                {"type": "command", "data": data, "relay_to": relay_to}
+            )
             await writer.drain()
         except ConnectionError:
             pass
 
     async def close(self) -> None:
-        if self._writer:
-            self._writer.close()
-            await self._writer.wait_closed()
-            self._writer = None
+        """Close the connection and stop reconnection attempts."""
+        self._should_reconnect = False
         if self._receive_task:
             self._receive_task.cancel()
             self._receive_task = None
+        await self._cleanup_transport()

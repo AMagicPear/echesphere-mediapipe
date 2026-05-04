@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import logging
 import threading
 import json
 from pathlib import Path
@@ -23,6 +24,12 @@ def main():
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=65432)
     args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
 
     loop = asyncio.new_event_loop()
 
@@ -94,9 +101,13 @@ def main():
     camera.on_frame(hand_tracker.recognize_async)
     camera.on_frame(face_tracker.recognize_async)
 
+    def on_connected():
+        asyncio.create_task(client.send_register("mediapipe", ["hands", "face"]))
+
+    client.on_connected += on_connected
+
     async def tcp_loop():
         await client.connect()
-        await client.send_register("mediapipe", ["hands", "face"])
         try:
             await asyncio.Event().wait()
         except KeyboardInterrupt:
@@ -111,22 +122,24 @@ def main():
 
     camera.start()
 
-    while True:
-        if args.preview:
-            rgb = camera.get_latest_frame()
-            if rgb is not None:
-                bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-                frame = hand_tracker.render_preview(bgr)
-                frame = face_tracker.render_preview(frame)
-                cv2.imshow("recognition", frame)
-        if cv2.waitKey(1) == 27:
-            break
-
-    camera.stop()
-    hand_tracker.stop()
-    face_tracker.stop()
-    loop.call_soon_threadsafe(loop.stop)
-    tcp_thread.join(timeout=2.0)
+    try:
+        while True:
+            if args.preview:
+                rgb = camera.get_latest_frame()
+                if rgb is not None:
+                    bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+                    frame = hand_tracker.render_preview(bgr)
+                    frame = face_tracker.render_preview(frame)
+                    cv2.imshow("recognition", frame)
+            if cv2.waitKey(1) == 27:
+                break
+    finally:
+        camera.stop()
+        hand_tracker.stop()
+        face_tracker.stop()
+        loop.call_soon_threadsafe(loop.stop)
+        tcp_thread.join(timeout=2.0)
+        cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":
