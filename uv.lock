@@ -89,7 +89,7 @@ wheels = [
 ]
 
 [[package]]
-name = "echoesphere-omni"
+name = "echo-omni"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

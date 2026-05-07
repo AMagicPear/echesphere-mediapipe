@@ -53,10 +53,14 @@ class HandsRecognizer:
         self._recognizer: Optional[vision.GestureRecognizer] = None
         self._result_callbacks: list[Callable[[HandResult], None]] = []
         self._direction_callbacks: list[Callable[[dict], None]] = []
+        self._sweep_callbacks: list[Callable[[], None]] = []
         self._current_gestures: dict[int, str] = {}
 
         # 左手方向指示功能开关
         self._left_hand_direction_enabled = False
+
+        # 双手挥散检测状态
+        self._sweep_cooldown_until = 0.0
 
         # 帧尺寸（从实际图像更新，用于方向向量计算）
         self._frame_width = 1280
@@ -116,6 +120,10 @@ class HandsRecognizer:
     def on_direction(self, callback: Callable[[dict], None]) -> None:
         """注册方向结果回调（接收 {"x": float, "y": float}）"""
         self._direction_callbacks.append(callback)
+
+    def on_sweep(self, callback: Callable[[], None]) -> None:
+        """注册双手挥散回调"""
+        self._sweep_callbacks.append(callback)
 
     def set_left_hand_direction(self, enabled: bool) -> None:
         """开关左手方向指示功能"""
@@ -190,6 +198,9 @@ class HandsRecognizer:
             for callback in self._direction_callbacks:
                 callback(left_dir)
 
+        # 双手挥散检测
+        self._detect_sweep(result)
+
     def _compute_left_direction(
         self, result: vision.GestureRecognizerResult
     ) -> dict | None:
@@ -226,6 +237,38 @@ class HandsRecognizer:
             "x": round(dx, 3),
             "y": round(dy, 3),
         }
+
+    _SWEEP_DISTANCE = 0.4        # 双手腕部距离阈值（归一化坐标）
+    _SWEEP_COOLDOWN_S = 1.5      # 触发后冷却时间
+
+    def _detect_sweep(self, result: vision.GestureRecognizerResult) -> None:
+        """检测双手向两侧挥散的动作：两手均为 Open_Palm 且距离足够远"""
+        if len(result.hand_landmarks) != 2:
+            return
+
+        # 检查两手是否都是 Open_Palm
+        if not result.gestures or len(result.gestures) != 2:
+            return
+        if result.gestures[0][0].category_name != "Open_Palm":
+            return
+        if result.gestures[1][0].category_name != "Open_Palm":
+            return
+
+        # 计算两手腕部距离
+        w0 = result.hand_landmarks[0][0]
+        w1 = result.hand_landmarks[1][0]
+        dist = ((w0.x - w1.x) ** 2 + (w0.y - w1.y) ** 2) ** 0.5
+
+        if dist < self._SWEEP_DISTANCE:
+            return
+
+        now = time.time()
+        if now < self._sweep_cooldown_until:
+            return
+
+        self._sweep_cooldown_until = now + self._SWEEP_COOLDOWN_S
+        for cb in self._sweep_callbacks:
+            cb()
 
     # ------------------------------------------------------------------
     # 预览渲染（CameraCapture 调用）

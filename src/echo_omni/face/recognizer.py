@@ -48,6 +48,8 @@ class FaceRecognizer:
 
         self._detector: Optional[vision.FaceLandmarker] = None
         self._result_callbacks: list[Callable[[FaceResult], None]] = []
+        self._presence_callbacks: list[Callable[[bool], None]] = []
+        self._face_present: bool = False
 
         # 线程安全的结果缓存
         self._lock = threading.Lock()
@@ -102,6 +104,10 @@ class FaceRecognizer:
         """注册结果回调"""
         self._result_callbacks.append(callback)
 
+    def on_presence(self, callback: Callable[[bool], None]) -> None:
+        """注册面部出现/消失回调（True=出现，False=消失）"""
+        self._presence_callbacks.append(callback)
+
     def close(self) -> None:
         """别名，兼容 close() 调用"""
         self.stop()
@@ -150,6 +156,13 @@ class FaceRecognizer:
         # 缓存
         with self._lock:
             self._cached_result = face_result
+
+        # 面部出现/消失检测
+        face_now_present = bool(result.face_landmarks)
+        if face_now_present != self._face_present:
+            self._face_present = face_now_present
+            for callback in self._presence_callbacks:
+                callback(face_now_present)
 
         # 节流检测：变化阈值 + 最小间隔双重约束
         if blendshapes:

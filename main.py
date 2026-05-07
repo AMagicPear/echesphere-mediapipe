@@ -77,11 +77,27 @@ def main():
             loop,
         )
 
+    def handle_sweep():
+        asyncio.run_coroutine_threadsafe(
+            client.send_command("hand:sweep", "unity"), loop
+        )
+
     def handle_face(r):
         asyncio.run_coroutine_threadsafe(on_face(r), loop)
 
+    def handle_face_presence(present: bool):
+        if present:
+            asyncio.run_coroutine_threadsafe(
+                client.send_command("face:in", "unity"), loop
+            )
+        else:
+            asyncio.run_coroutine_threadsafe(
+                client.send_command("face:out", "unity"), loop
+            )
+
     hand_tracker.on_result(handle_hand)
     hand_tracker.on_direction(handle_direction)
+    hand_tracker.on_sweep(handle_sweep)
     if args.left_hand_direction:
         hand_tracker.set_left_hand_direction(True)
     hand_tracker.start()
@@ -91,6 +107,7 @@ def main():
         preview=args.preview,
     )
     face_tracker.on_result(handle_face)
+    face_tracker.on_presence(handle_face_presence)
     face_tracker.start()
 
     camera = CameraCapture(
