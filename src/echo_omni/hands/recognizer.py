@@ -59,6 +59,9 @@ class HandsRecognizer:
         # 左手方向指示功能开关
         self._left_hand_direction_enabled = False
 
+        # 双手挥散检测开关
+        self._sweep_enabled = True
+
         # 双手挥散检测状态
         self._sweep_cooldown_until = 0.0
 
@@ -128,6 +131,10 @@ class HandsRecognizer:
     def set_left_hand_direction(self, enabled: bool) -> None:
         """开关左手方向指示功能"""
         self._left_hand_direction_enabled = enabled
+
+    def set_sweep_enabled(self, enabled: bool) -> None:
+        """开关双手挥散检测"""
+        self._sweep_enabled = enabled
 
     def close(self) -> None:
         """别名，兼容 close() 调用"""
@@ -199,7 +206,8 @@ class HandsRecognizer:
                 callback(left_dir)
 
         # 双手挥散检测
-        self._detect_sweep(result)
+        if self._sweep_enabled:
+            self._detect_sweep(result)
 
     def _compute_left_direction(
         self, result: vision.GestureRecognizerResult

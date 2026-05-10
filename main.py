@@ -43,8 +43,10 @@ def main():
         data = msg.get("data", "")
         if data == "hand_direction:on":
             hand_tracker.set_left_hand_direction(True)
+            # hand_tracker.set_sweep_enabled(False)
         elif data == "hand_direction:off":
             hand_tracker.set_left_hand_direction(False)
+            # hand_tracker.set_sweep_enabled(True)
 
     client = TcpClient(args.host, args.port)
     client.on_command += handle_command
@@ -79,7 +81,7 @@ def main():
 
     def handle_sweep():
         asyncio.run_coroutine_threadsafe(
-            client.send_command("hand:sweep", "unity"), loop
+            client.send_command("input:submit", "unity"), loop
         )
 
     def handle_face(r):
